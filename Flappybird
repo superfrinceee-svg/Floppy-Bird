@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Floppy Bird — Lightweight</title>
+<style>
+  /* Simple, clean styling. Scales to small screens. */
+  :root{
+    --bg:#70c5ce;
+    --ground:#ded895;
+    --pipe:#2aa849;
+    --accent:#ffdd57;
+    --ui-bg: rgba(255,255,255,0.9);
+  }
+  html,body{height:100%;margin:0;font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;}
+  .wrap{display:flex;align-items:center;justify-content:center;height:100%;background:linear-gradient(#aee1ea 0%, var(--bg) 60%);}
+  canvas{display:block;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.2);background:transparent}
+  .ui{
+    position:fixed;left:12px;top:12px;padding:8px 12px;border-radius:10px;background:var(--ui-bg);backdrop-filter: blur(4px);
+    box-shadow:0 4px 14px rgba(0,0,0,.12);
+  }
+  .ui .title{font-weight:700;margin-bottom:6px}
+  .ui small{display:block;color:#666}
+  .centerOverlay{
+    position:absolute;left:50%;top:32%;transform:translateX(-50%);text-align:center;
+    background:linear-gradient(180deg, rgba(255,255,255,.95), rgba(255,255,255,.85));
+    padding:18px;border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,.14);
+  }
+  button {font-size:1rem;padding:8px 14px;border-radius:10px;border:none;background:var(--accent);cursor:pointer}
+  .small{font-size:.9rem;padding:6px 10px}
+  footer{position:fixed;right:12px;bottom:12px;padding:8px 12px;border-radius:10px;background:var(--ui-bg);}
+  @media (max-width:600px){
+    .centerOverlay{top:25%;width:90%;padding:14px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <canvas id="game" width="600" height="800" role="img" aria-label="Floppy Bird game"></canvas>
+  <div class="centerOverlay" id="overlay" style="display:none;">
+    <h2 id="overlay-title">Paused</h2>
+    <p id="overlay-sub">Tap or press <strong>Space</strong> / click to play.</p>
+    <div style="margin-top:8px">
+      <button id="startBtn">Start</button>
+      <button id="muteBtn" class="small">Mute</button>
+      <button id="resetBtn" class="small">Reset High Score</button>
+    </div>
+  </div>
+</div>
+
+<div class="ui" aria-hidden="true">
+  <div class="title">Floppy Bird</div>
+  <small>Score: <span id="score">0</span> — Best: <span id="best">0</span></small>
+  <small>Controls: Space / Click / Tap</small>
+</div>
+<footer aria-hidden="true"><small>Built with care — responsive, local high-score, & simple sound.</small></footer>
+
+<script>
+/* ========= Floppy Bird — Single-file, well-structured =========
+   Features:
+   - Simple physics (gravity/impulse)
+   - Procedural pipe generation
+   - Collision detection and scoring
+   - Smooth animation, pause/resume, mobile touch support
+   - LocalStorage best score
+   - Minimal procedural sound (WebAudio)
+   - Clean code, modular-ish for a single file
+*/
+
+/* ---------------------- Config ---------------------- */
+const CONFIG = {
+  canvasWidth: 600,
+  canvasHeight: 800,
+  bgColorTop: '#aee1ea',
+  bgColorBottom: '#70c5ce',
+  groundHeight: 120,
+  gravity: 1800,        // px / s^2
+  flapImpulse: -420,    // px / s (negative = upward)
+  maxFallSpeed: 1200,   // terminal velocity
+  pipeWidth: 120,
+  pipeGap: 190,
+  pipeMinY: 120,
+  pipeMaxY: 520,
+  pipeSpacing: 280,     // distance between pipe pairs
+  pipeSpeedBase: 200,   // px / s
+  pipeSpeedIncrease: 6, // speed increase per score for gentle difficulty growth
+  birdX: 160,
+  birdRadius: 20,
+  spawnOffset: 800      // initial pipe spawn offset
+};
+
+/* ---------------------- State ---------------------- */
+let C, ctx;
+let lastTime = 0;
+let accum = 0;
+let dt = 0;
+let running = false;
+let gameOver = false;
+let score = 0;
+let best = parseInt(localStorage.getItem('floppy.best') || '0', 10);
+let pipes = [];
+let bird = null;
+let pipeTimer = 0;
+let audio = null;
+let audioEnabled = true;
+
+/* ---------------------- Utility ---------------------- */
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+function randInt(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
+
+/* ---------------------- Audio (procedural, tiny) ---------------------- */
+// Simple beep for flap and a 'chime' for scoring. No external files.
+function initAudio(){
+  try{
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    audio = ctx;
+    return ctx;
+  }catch(e){
+    audio = null;
+    return null;
+  }
+}
+function playTone(freq,dur=0.08, type='sine', vol=0.12){
+  if(!audio || !audioEnabled) return;
+  const now = audio.currentTime;
+  const o = audio.createOscillator();
+  const g = audio.createGain();
+  o.type = type;
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(vol, now);
+  g.gain.exponentialRampToValueAtTime(0.001, now+dur);
+  o.connect(g); g.connect(audio.destination);
+  o.start(now); o.stop(now+dur+0.02);
+}
+
+/* ---------------------- Bird ---------------------- */
+function createBird(){
+  return {
+    x: CONFIG.birdX,
+    y: C.height*0.35,
+    vy: 0,
+    radius: CONFIG.birdRadius,
+    rotat
